@@ -15,3 +15,8 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./... && go test -race ./...
       - run: GOOS=wasip1 GOARCH=wasm go vet ./...
+  e2e:
+    uses: gate4ai/e2e/.github/workflows/e2e.yml@main
+    with:
+      repo: ${{ github.repository }}
+      ref: ${{ github.sha }}
