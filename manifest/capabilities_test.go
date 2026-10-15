@@ -76,14 +76,14 @@ func TestParseAndResolve(t *testing.T) {
 
 func TestValidateRejects(t *testing.T) {
 	cases := map[string]string{
-		"bad scheme":        "capabilities: { network: [ { host: a.com, scheme: ftp } ] }",
-		"secret no bind":    "capabilities: { secrets: [ { alias: \"@x\", bind: [] } ] }",
-		"secret not alias":  "capabilities: { secrets: [ { alias: \"x\", bind: [a.com] } ] }",
-		"relative files":    "capabilities: { files: [ \"notes/**\" ] }",
-		"two templates":     "capabilities: { files: [ \"${setting:a}/${setting:b}\" ] }",
-		"money no verify":   "actions: [ { name: pay, class: money } ]",
-		"unknown field":     "capabilites: {}",
-		"bad runtime":       "runtime: docker",
+		"bad scheme":       "capabilities: { network: [ { host: a.com, scheme: ftp } ] }",
+		"secret no bind":   "capabilities: { secrets: [ { alias: \"@x\", bind: [] } ] }",
+		"secret not alias": "capabilities: { secrets: [ { alias: \"x\", bind: [a.com] } ] }",
+		"relative files":   "capabilities: { files: [ \"notes/**\" ] }",
+		"two templates":    "capabilities: { files: [ \"${setting:a}/${setting:b}\" ] }",
+		"money no verify":  "actions: [ { name: pay, class: money } ]",
+		"unknown field":    "capabilites: {}",
+		"bad runtime":      "runtime: docker",
 	}
 	for name, body := range cases {
 		if _, err := Parse([]byte("connector: bank\n" + body)); err == nil {
