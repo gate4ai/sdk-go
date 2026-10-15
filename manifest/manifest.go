@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strings"
 )
 
 // Среды исполнения.
@@ -39,7 +38,7 @@ type Action struct {
 	Class        string   `json:"class" yaml:"class"`                                     // read | write | external | money
 	InputSchema  Schema   `json:"input_schema" yaml:"input_schema"`                       // аргументы (как inputSchema MCP)
 	OutputSchema *Schema  `json:"output_schema,omitempty" yaml:"output_schema,omitempty"` // структурированный результат (как outputSchema MCP)
-	Verify       string   `json:"verify,omitempty" yaml:"verify,omitempty"`               // метод проверки результата, "" — нет; для money — "<коннектор>.<действие>" другого коннектора
+	Verify       string   `json:"verify,omitempty" yaml:"verify,omitempty"`               // метод проверки результата, "" — нет; для money обязателен
 	Evidence     string   `json:"evidence,omitempty" yaml:"evidence,omitempty"`           // формат доказательства: eml, text, png, json
 	Untrusted    bool     `json:"untrusted,omitempty" yaml:"untrusted,omitempty"`         // результат содержит недоверенный контент
 	Sensitive    []string `json:"sensitive,omitempty" yaml:"sensitive,omitempty"`         // аргументы, которые маскируются в журнале
@@ -88,12 +87,8 @@ func (m *Manifest) Validate() error {
 		default:
 			return fmt.Errorf("manifest %s.%s: bad class %q", m.Connector, a.Name, a.Class)
 		}
-		// Коннектор не подтверждает сам себя: проверка money — действием другого коннектора.
-		if a.Class == "money" {
-			other, _, ok := strings.Cut(a.Verify, ".")
-			if !ok || other == m.Connector || !nameRe.MatchString(other) {
-				return fmt.Errorf("manifest %s.%s: class money needs verify by another connector (\"<connector>.<action>\")", m.Connector, a.Name)
-			}
+		if a.Class == "money" && a.Verify == "" {
+			return fmt.Errorf("manifest %s.%s: class money needs verify", m.Connector, a.Name)
 		}
 		if err := a.InputSchema.validate(""); err != nil {
 			return fmt.Errorf("manifest %s.%s: input_schema: %w", m.Connector, a.Name, err)

@@ -81,7 +81,6 @@ func TestValidateRejects(t *testing.T) {
 		"secret not alias":  "capabilities: { secrets: [ { alias: \"x\", bind: [a.com] } ] }",
 		"relative files":    "capabilities: { files: [ \"notes/**\" ] }",
 		"two templates":     "capabilities: { files: [ \"${setting:a}/${setting:b}\" ] }",
-		"money self verify": "actions: [ { name: pay, class: money, verify: \"bank.pay\" } ]",
 		"money no verify":   "actions: [ { name: pay, class: money } ]",
 		"unknown field":     "capabilites: {}",
 		"bad runtime":       "runtime: docker",
@@ -91,7 +90,7 @@ func TestValidateRejects(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if _, err := Parse([]byte("connector: bank\nactions: [ { name: pay, class: money, verify: \"statement.find_payment\" } ]")); err != nil {
+	if _, err := Parse([]byte("connector: bank\nactions: [ { name: pay, class: money, verify: payment_status } ]")); err != nil {
 		t.Fatal(err)
 	}
 }
