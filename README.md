@@ -1,11 +1,11 @@
 # gate4ai sdk-go
 
-SDK коннекторов [gate4.ai](https://github.com/gate4ai/gate4ai) на Go. Это контракт между хостом и коннектором: манифест, ABI v1 и функции хоста.
+SDK коннекторов [gate4.ai](https://github.com/gate4ai/gate4ai) на Go. Это контракт между хостом и коннектором: манифест, ABI v2 и функции хоста.
 
 | Пакет | Что это |
 |---|---|
 | `manifest` | манифест: действия, аргументы, класс эффекта, проверка результата, `runtime`, `capabilities`, `limits`; шаблоны `${setting:…}` |
-| `abi` | ABI v1: экспорты модуля, функции хоста, их запросы и ответы; `abi.Host` — типизированные функции хоста для кода коннектора |
+| `abi` | ABI v2: экспорты модуля, функции хоста, их запросы и ответы; `abi.Host` — типизированные функции хоста для кода коннектора |
 | `connector` | PDK: `connector.Register` и экспорты WASM-модуля (`GOOS=wasip1`) |
 | `capability` | проверка вызовов по возможностям манифеста (`capability_denied`) |
 | `hostfuncs` | реализация функций хоста поверх служб хоста; та же, что в хосте gate4.ai |
@@ -43,11 +43,11 @@ func (Hello) Execute(ctx context.Context, h *abi.Host, r abi.ExecRequest) (abi.E
 	if err != nil {
 		return abi.ExecResult{}, err
 	}
-	return abi.ExecResult{Result: string(resp.Body)}, nil
+	return abi.ExecResult{Content: []abi.Content{abi.Text(string(resp.Body))}}, nil
 }
 
-func (Hello) Verify(context.Context, *abi.Host, abi.VerifyRequest) (abi.VerifyResult, error) {
-	return abi.VerifyResult{Status: abi.Unverified, Method: "none"}, nil
+func (Hello) Verify(_ context.Context, _ *abi.Host, r abi.VerifyRequest) (abi.VerifyResult, error) {
+	return abi.VerifyResult{}, abi.Errorf(abi.CodeBadRequest, "action %s has no verification", r.Action)
 }
 
 func init() { connector.Register(manifestYAML, Hello{}) }
@@ -62,7 +62,13 @@ capabilities:
   network: [ { host: api.example.com, scheme: https } ]
   secrets: [ { alias: "@example", bind: [api.example.com] } ]
 actions:
-  - { name: say, class: read }
+  - name: say
+    class: read
+    input_schema:
+      type: object
+      properties:
+        name: { type: string, description: who to greet }
+      required: [name]
 ```
 
 ```sh
@@ -71,9 +77,17 @@ GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o connector.wasm .
 
 Тесты — нативно, на `hosttest` (те же проверки возможностей, что в хосте). Примеры — коннекторы `gate4ai-mail`, `gate4ai-files`, `gate4ai-browser`.
 
-## ABI v1
+## ABI v2
 
 Описание экспортов и импортов — в документации пакета [`abi`](abi/abi.go). Один экземпляр модуля обслуживает один вызов; лимиты памяти и времени — `limits` манифеста.
+
+Формы данных — как у инструментов MCP, чтобы хост отдавал их агенту без перекодирования:
+
+- аргументы действия — `input_schema`, подмножество JSON Schema (`object`, `string`, `number`, `integer`, `boolean`, `array`, вложенные объекты; `enum`, `format: email | url | path`, `default`, `minimum`/`maximum`, `maxLength`, `minItems`/`maxItems`); у объектов лишних полей не бывает;
+- результат — `content` (блоки `text`, `image`, `resource`, `resource_link`) и/или `structured`; если в манифесте есть `output_schema`, `structured` обязателен и сверяется с ней;
+- проверка — `verified` / `not_confirmed` / `verify_after`; ошибка `verify` — «проверить не удалось».
+
+Манифест с `args` (ABI v1) не принимается — пересоберите коннектор с текущим SDK.
 
 ## Лицензия
 

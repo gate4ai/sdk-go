@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package abi — ABI v1 между хостом gate4.ai и коннектором: экспорты модуля,
+// Package abi — ABI v2 между хостом gate4.ai и коннектором: экспорты модуля,
 // функции хоста и их запросы/ответы. Всё передаётся в JSON.
 //
 // Экспорты WASM-модуля (Go: GOOS=wasip1, -buildmode=c-shared; хост вызывает
@@ -23,10 +23,12 @@ package abi
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/gate4ai/sdk-go/manifest"
 )
 
 // Version — версия ABI.
-const Version = 1
+const Version = 2
 
 // Имена экспортов и импортов.
 const (
@@ -84,7 +86,9 @@ type Error struct {
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
 // Errorf — ошибка с кодом.
-func Errorf(code, f string, a ...any) *Error { return &Error{Code: code, Message: fmt.Sprintf(f, a...)} }
+func Errorf(code, f string, a ...any) *Error {
+	return &Error{Code: code, Message: fmt.Sprintf(f, a...)}
+}
 
 // Response — ответ экспорта модуля и функции хоста.
 type Response struct {
@@ -143,36 +147,142 @@ type EvidenceItem struct {
 	Data []byte `json:"data"`
 }
 
-// ExecResult — результат исполнения.
+// Типы блоков содержимого — как у блоков content результата инструмента MCP.
+const (
+	ContentText         = "text"          // Text
+	ContentImage        = "image"         // Data + MIMEType (image/*)
+	ContentResource     = "resource"      // встроенный ресурс: URI + MIMEType + Text или Data
+	ContentResourceLink = "resource_link" // ссылка на ресурс: URI + Name (+ MIMEType)
+)
+
+// Content — блок содержимого результата для агента.
+type Content struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+	MIMEType string `json:"mime_type,omitempty"`
+	URI      string `json:"uri,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
+// Text — текстовый блок.
+func Text(s string) Content { return Content{Type: ContentText, Text: s} }
+
+// Image — изображение.
+func Image(mime string, data []byte) Content {
+	return Content{Type: ContentImage, MIMEType: mime, Data: data}
+}
+
+// Resource — встроенный ресурс: текст (data == nil) или двоичные данные.
+func Resource(uri, mime, text string, data []byte) Content {
+	return Content{Type: ContentResource, URI: uri, MIMEType: mime, Text: text, Data: data}
+}
+
+// ResourceLink — ссылка на ресурс.
+func ResourceLink(uri, name, mime string) Content {
+	return Content{Type: ContentResourceLink, URI: uri, Name: name, MIMEType: mime}
+}
+
+// Validate проверяет блок.
+func (c Content) Validate() error {
+	switch c.Type {
+	case ContentText:
+		if len(c.Data) > 0 || c.URI != "" {
+			return Errorf(CodeBadRequest, "text content: only text is allowed")
+		}
+	case ContentImage:
+		if len(c.Data) == 0 || len(c.MIMEType) < 7 || c.MIMEType[:6] != "image/" {
+			return Errorf(CodeBadRequest, "image content: data and image/* mime_type are required")
+		}
+	case ContentResource:
+		if c.URI == "" || (c.Text != "" && len(c.Data) > 0) {
+			return Errorf(CodeBadRequest, "resource content: uri and either text or data are required")
+		}
+	case ContentResourceLink:
+		if c.URI == "" || c.Name == "" {
+			return Errorf(CodeBadRequest, "resource_link content: uri and name are required")
+		}
+	default:
+		return Errorf(CodeBadRequest, "unknown content type %q", c.Type)
+	}
+	return nil
+}
+
+// ExecResult — результат исполнения: содержимое для агента (Content) и/или
+// структурированный результат (Structured, по output_schema действия, если она
+// объявлена) — как content и structuredContent результата инструмента MCP.
+// VerifyAfterS > 0 — действие отправлено, но синхронно проверить его нельзя:
+// хост вызовет verify через VerifyAfterS секунд (verify_after).
 type ExecResult struct {
-	Result    any            `json:"result"`
-	ResultRef string         `json:"result_ref,omitempty"` // идентификатор результата (Message-ID, путь, URL)
-	Evidence  []EvidenceItem `json:"evidence,omitempty"`
-	Source    string         `json:"source,omitempty"` // источник недоверенного контента: "email:<id>", "web:<url>"
+	Content      []Content      `json:"content,omitempty"`
+	Structured   any            `json:"structured,omitempty"`
+	ResultRef    string         `json:"result_ref,omitempty"` // идентификатор результата (Message-ID, путь, URL)
+	Evidence     []EvidenceItem `json:"evidence,omitempty"`
+	Source       string         `json:"source,omitempty"` // источник недоверенного контента: "email:<id>", "web:<url>"
+	VerifyAfterS int            `json:"verify_after_s,omitempty"`
+}
+
+// CheckResult проверяет результат коннектора: блоки содержимого и
+// структурированный результат по output_schema действия (если она объявлена,
+// результат обязателен — как structuredContent при outputSchema в MCP).
+func CheckResult(r ExecResult, out *manifest.Schema) error {
+	for _, c := range r.Content {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+	}
+	if r.VerifyAfterS < 0 {
+		return Errorf(CodeBadRequest, "verify_after_s must not be negative")
+	}
+	if out == nil {
+		return nil
+	}
+	if r.Structured == nil {
+		return Errorf(CodeBadRequest, "structured result is required by output_schema")
+	}
+	// Сверяем форму после JSON, как её увидит агент.
+	b, err := json.Marshal(r.Structured)
+	if err != nil {
+		return Errorf(CodeBadRequest, "structured result: %v", err)
+	}
+	var v any
+	_ = json.Unmarshal(b, &v)
+	if err := out.Check(v); err != nil {
+		return Errorf(CodeBadRequest, "structured result does not match output_schema: %v", err)
+	}
+	return nil
 }
 
 // VerifyRequest — проверка результата по независимому каналу.
 type VerifyRequest struct {
-	Action    string         `json:"action"`
-	Args      map[string]any `json:"args"`
-	Settings  map[string]any `json:"settings"`
-	ResultRef string         `json:"result_ref"`
-	Result    any            `json:"result"`
+	Action     string         `json:"action"`
+	Args       map[string]any `json:"args"`
+	Settings   map[string]any `json:"settings"`
+	ResultRef  string         `json:"result_ref"`
+	Structured any            `json:"structured,omitempty"`
 }
 
-// Статусы проверки.
+// Статусы проверки, которые возвращает verify коннектора.
 const (
-	Verified   = "verified"
-	Unverified = "unverified"
-	Failed     = "failed"
+	Verified     = "verified"      // действие подтверждено
+	NotConfirmed = "not_confirmed" // действие не подтверждено (не прошло, отклонено)
+	VerifyAfter  = "verify_after"  // пока не ясно: повторить через VerifyAfterS секунд
 )
 
-// VerifyResult — итог проверки.
+// Статусы проверки, которые ставит хост.
+const (
+	Unverified = "unverified" // проверить не удалось (ошибка verify, исчерпан срок)
+	Pending    = "pending"    // проверка отложена (verify_after)
+)
+
+// VerifyResult — итог проверки. Ошибка verify (а не NotConfirmed) — проверить
+// не удалось: сеть, таймаут, сбой сервиса.
 type VerifyResult struct {
-	Status   string         `json:"status"`
-	Method   string         `json:"method"`
-	Detail   string         `json:"detail,omitempty"`
-	Evidence []EvidenceItem `json:"evidence,omitempty"`
+	Status       string         `json:"status"`
+	VerifyAfterS int            `json:"verify_after_s,omitempty"`
+	Method       string         `json:"method"`
+	Detail       string         `json:"detail,omitempty"`
+	Evidence     []EvidenceItem `json:"evidence,omitempty"`
 }
 
 // HTTPRequest — http_request. В заголовках и теле плейсхолдер {{secret:@alias}}

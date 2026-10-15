@@ -25,9 +25,12 @@ actions:
   - name: send
     class: external
     verify: sent_folder
-    args:
-      - { name: to, type: "string[]", required: true, format: email }
-      - { name: limit, type: integer, default: 20 }
+    input_schema:
+      type: object
+      properties:
+        to: { type: array, items: { type: string, format: email } }
+        limit: { type: integer, default: 20 }
+      required: [to]
 `
 
 func TestParseAndResolve(t *testing.T) {
@@ -38,7 +41,7 @@ func TestParseAndResolve(t *testing.T) {
 	if m.Runtime != RuntimeWasm || m.Limits.WithDefaults().TimeoutS != DefaultTimeoutS || m.Limits.WithDefaults().MemoryMB != 64 {
 		t.Fatal(m.Runtime, m.Limits)
 	}
-	if d := m.Actions[0].Args[1].Default; d != 20.0 {
+	if d := m.Actions[0].InputSchema.Properties[1].Schema.Default; d != 20.0 {
 		t.Fatalf("default not normalized to float64: %#v", d)
 	}
 	settings := map[string]any{

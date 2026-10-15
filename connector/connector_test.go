@@ -57,7 +57,7 @@ func (echo) Execute(ctx context.Context, h *abi.Host, req abi.ExecRequest) (abi.
 		out = append(out, <-lines)
 	}
 	_ = h.Evidence("log.txt", "text/plain", []byte(strings.Join(out, ",")))
-	return abi.ExecResult{Result: out}, nil
+	return abi.ExecResult{Structured: map[string]any{"echo": out}, Content: []abi.Content{abi.Text(strings.Join(out, " "))}}, nil
 }
 
 func (echo) Verify(context.Context, *abi.Host, abi.VerifyRequest) (abi.VerifyResult, error) {
@@ -69,7 +69,16 @@ connector: echo
 capabilities:
   network: [ { host: 127.0.0.1, port: "${setting:port}", scheme: tcp } ]
 actions:
-  - { name: say, class: read, args: [ { name: words, type: "string[]", required: true } ] }
+  - name: say
+    class: read
+    input_schema:
+      type: object
+      properties: { words: { type: array, items: { type: string } } }
+      required: [words]
+    output_schema:
+      type: object
+      properties: { echo: { type: array, items: { type: string } } }
+      required: [echo]
   - { name: boom, class: read }
   - { name: fail, class: read }
 `
@@ -106,7 +115,7 @@ func TestConnectorOnTestHost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := res.Result.([]any); len(got) != 3 || got[2] != "CCC" {
+	if got := res.Structured.(map[string]any)["echo"].([]any); len(got) != 3 || got[2] != "CCC" || res.Content[0].Text != "A BB CCC" {
 		t.Fatal(got)
 	}
 	if len(res.Evidence) != 1 || string(res.Evidence[0].Data) != "A,BB,CCC" {

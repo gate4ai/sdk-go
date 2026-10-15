@@ -81,7 +81,8 @@ func (h *Host) run(c connector.Connector, op string, req any, out any) error {
 	return abi.Decode(connector.Handle(h.Manifest, c, d, op, b), out)
 }
 
-// Execute исполняет действие (аргументы нормализуются по манифесту, как в хосте);
+// Execute исполняет действие (аргументы нормализуются по манифесту, результат
+// проверяется по output_schema, как в хосте);
 // доказательства evidence_add добавляются к результату.
 func (h *Host) Execute(c connector.Connector, action string, args map[string]any) (abi.ExecResult, error) {
 	var res abi.ExecResult
@@ -94,16 +95,20 @@ func (h *Host) Execute(c connector.Connector, action string, args map[string]any
 		return res, err
 	}
 	err = h.run(c, connector.OpExecute, abi.ExecRequest{Action: action, Args: norm, Settings: h.Settings}, &res)
-	if err == nil {
-		res.Evidence = append(res.Evidence, h.Last.Evidence()...)
+	if err != nil {
+		return res, err
 	}
-	return res, err
+	if err := abi.CheckResult(res, a.OutputSchema); err != nil {
+		return res, err
+	}
+	res.Evidence = append(res.Evidence, h.Last.Evidence()...)
+	return res, nil
 }
 
 // Verify проверяет результат; args — аргументы исполненного действия (как есть).
 func (h *Host) Verify(c connector.Connector, action string, args map[string]any, ex abi.ExecResult) (abi.VerifyResult, error) {
 	var res abi.VerifyResult
-	err := h.run(c, connector.OpVerify, abi.VerifyRequest{Action: action, Args: args, Settings: h.Settings, ResultRef: ex.ResultRef, Result: ex.Result}, &res)
+	err := h.run(c, connector.OpVerify, abi.VerifyRequest{Action: action, Args: args, Settings: h.Settings, ResultRef: ex.ResultRef, Structured: ex.Structured}, &res)
 	return res, err
 }
 

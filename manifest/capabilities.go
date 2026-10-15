@@ -346,6 +346,9 @@ func Parse(b []byte) (Manifest, error) {
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&m); err != nil {
+		if strings.Contains(err.Error(), "field args not found") {
+			return m, fmt.Errorf("manifest: actions use \"args\" of ABI v1; ABI v2 declares arguments as input_schema — rebuild the connector with the current sdk-go")
+		}
 		return m, fmt.Errorf("manifest: %w", err)
 	}
 	normalizeDefaults(&m)
@@ -356,14 +359,8 @@ func Parse(b []byte) (Manifest, error) {
 // (int из YAML → float64), чтобы манифест из YAML и из JSON совпадали.
 func normalizeDefaults(m *Manifest) {
 	for i := range m.Actions {
-		for j := range m.Actions[i].Args {
-			if d := m.Actions[i].Args[j].Default; d != nil {
-				b, _ := json.Marshal(d)
-				var v any
-				_ = json.Unmarshal(b, &v)
-				m.Actions[i].Args[j].Default = v
-			}
-		}
+		m.Actions[i].InputSchema.normalizeDefaults()
+		m.Actions[i].OutputSchema.normalizeDefaults()
 	}
 }
 
