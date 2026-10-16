@@ -75,7 +75,7 @@ actions:
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o connector.wasm .
 ```
 
-Тесты — нативно, на `hosttest` (те же проверки возможностей, что в хосте). Примеры — коннекторы `gate4ai-mail`, `gate4ai-files`, `gate4ai-browser`.
+Тесты — нативно, на `hosttest` (те же проверки возможностей, что в хосте). Примеры — коннекторы `gate4ai-mail`, `gate4ai-files`, `gate4ai-browser`, `gate4ai-tbank` (`browser_act`).
 
 ## ABI v2
 

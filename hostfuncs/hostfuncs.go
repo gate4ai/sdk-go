@@ -16,6 +16,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -62,6 +63,8 @@ type BrowserSession interface {
 	Observe(ctx context.Context, maxChars int) (abi.BrowserPage, error)
 	Extract(ctx context.Context, instruction string) (any, error)
 	ScreenshotElement(ctx context.Context, selector string) ([]byte, error)
+	// Act — действие по селектору (abi.Act*); элемента нет — ошибка ErrNotFound.
+	Act(ctx context.Context, r abi.BrowserRequest) (abi.BrowserActResponse, error)
 	Release()
 }
 
@@ -624,7 +627,9 @@ func (d *Dispatcher) browser(fn string, r abi.BrowserRequest) (any, error) {
 		return nil, err
 	}
 	if fn == abi.FnBrowserAct {
-		return nil, abi.Errorf(abi.CodeNotSupported, "browser_act is not available yet (read-only browser)")
+		if err := checkAct(r); err != nil {
+			return nil, err
+		}
 	}
 	if fn == abi.FnBrowserOpen {
 		if err := d.Check.Browser(r.URL); err != nil {
@@ -675,6 +680,19 @@ func (d *Dispatcher) browser(fn string, r abi.BrowserRequest) (any, error) {
 			return nil, abi.Errorf(abi.CodeIO, "%v", err)
 		}
 		return abi.BrowserExtractResponse{Data: v}, nil
+	case abi.FnBrowserAct:
+		res, err := s.Act(ctx, r)
+		if errors.Is(err, ErrNotFound) {
+			return nil, abi.Errorf(abi.CodeNotFound, "%v", err)
+		}
+		if err != nil {
+			return nil, abi.Errorf(abi.CodeIO, "%v", err)
+		}
+		// клик мог увести страницу: итоговый адрес снова проверяется
+		if err := d.Check.Browser(res.URL); err != nil {
+			return nil, err
+		}
+		return res, nil
 	default:
 		png, err := s.ScreenshotElement(ctx, r.Selector)
 		if err != nil {
@@ -682,6 +700,40 @@ func (d *Dispatcher) browser(fn string, r abi.BrowserRequest) (any, error) {
 		}
 		return abi.BrowserScreenshotResponse{PNG: png}, nil
 	}
+}
+
+// ErrNotFound — элемента для browser_act нет на странице за время ожидания.
+var ErrNotFound = errors.New("element not found")
+
+// Пределы browser_act.
+const (
+	MaxActValue   = 4096
+	MaxActTimeout = 60000
+)
+
+func checkAct(r abi.BrowserRequest) error {
+	switch r.Method {
+	case abi.ActClick, abi.ActWait:
+	case abi.ActFill:
+		if len(r.Value) > MaxActValue {
+			return abi.Errorf(abi.CodeLimit, "browser_act: value is longer than %d bytes", MaxActValue)
+		}
+	case abi.ActPress:
+		switch r.Value {
+		case "Enter", "Tab", "Escape", "Backspace", "ArrowDown", "ArrowUp":
+		default:
+			return abi.Errorf(abi.CodeBadRequest, "browser_act: key %q is not supported", r.Value)
+		}
+	default:
+		return abi.Errorf(abi.CodeBadRequest, "browser_act: unknown method %q (click, fill, press, wait)", r.Method)
+	}
+	if r.Selector == "" {
+		return abi.Errorf(abi.CodeBadRequest, "browser_act: selector is required")
+	}
+	if r.TimeoutMS < 0 || r.TimeoutMS > MaxActTimeout {
+		return abi.Errorf(abi.CodeLimit, "browser_act: timeout_ms must be 0..%d", MaxActTimeout)
+	}
+	return nil
 }
 
 // Close закрывает соединения и освобождает браузерную сессию вызова.

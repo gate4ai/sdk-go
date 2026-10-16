@@ -439,13 +439,35 @@ type LogRequest struct {
 
 // BrowserRequest — browser_open (URL), browser_observe (MaxChars),
 // browser_extract (Instruction), browser_screenshot_element (Selector),
-// browser_act (Selector + Method — только наблюдённое действие).
+// browser_act (Selector + Method — действие по селектору, без естественного языка).
 type BrowserRequest struct {
 	URL         string `json:"url,omitempty"`
 	MaxChars    int    `json:"max_chars,omitempty"`
 	Instruction string `json:"instruction,omitempty"`
 	Selector    string `json:"selector,omitempty"`
 	Method      string `json:"method,omitempty"`
+	// Text — browser_act: из элементов по селектору берётся первый видимый,
+	// чей текст (или подпись, placeholder, aria-label) содержит Text.
+	Text string `json:"text,omitempty"`
+	// Value — browser_act: значение для fill, клавиша для press.
+	Value string `json:"value,omitempty"`
+	// TimeoutMS — browser_act: сколько ждать появления элемента (0 — 10 с, предел 60 с).
+	TimeoutMS int `json:"timeout_ms,omitempty"`
+}
+
+// Методы browser_act.
+const (
+	ActClick = "click" // клик по элементу
+	ActFill  = "fill"  // ввод Value в поле (input, textarea, contenteditable)
+	ActPress = "press" // клавиша Value (Enter, Tab, Escape) в элементе
+	ActWait  = "wait"  // дождаться элемента и вернуть его текст
+)
+
+// BrowserActResponse — browser_act: адрес страницы после действия и текст
+// элемента (до 2000 символов).
+type BrowserActResponse struct {
+	URL  string `json:"url"`
+	Text string `json:"text,omitempty"`
 }
 
 // BrowserPage — страница: адрес после редиректов, заголовок, текст (observe).

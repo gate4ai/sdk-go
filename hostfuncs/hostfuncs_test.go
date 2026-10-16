@@ -375,9 +375,22 @@ func (b *fakeBrowser) Open(_ context.Context, u string, _ []string) (abi.Browser
 func (b *fakeBrowser) Observe(context.Context, int) (abi.BrowserPage, error) {
 	return abi.BrowserPage{URL: "https://lk.example/", Text: "balance 10"}, nil
 }
-func (b *fakeBrowser) Extract(context.Context, string) (any, error)                { return map[string]any{"x": 1.0}, nil }
-func (b *fakeBrowser) ScreenshotElement(context.Context, string) ([]byte, error) { return []byte("png"), nil }
-func (b *fakeBrowser) Release()                                                  { b.released = true }
+func (b *fakeBrowser) Extract(context.Context, string) (any, error) {
+	return map[string]any{"x": 1.0}, nil
+}
+func (b *fakeBrowser) ScreenshotElement(context.Context, string) ([]byte, error) {
+	return []byte("png"), nil
+}
+func (b *fakeBrowser) Release() { b.released = true }
+func (b *fakeBrowser) Act(_ context.Context, r abi.BrowserRequest) (abi.BrowserActResponse, error) {
+	switch r.Selector {
+	case "#missing":
+		return abi.BrowserActResponse{}, ErrNotFound
+	case "#away":
+		return abi.BrowserActResponse{URL: "https://evil.example/"}, nil
+	}
+	return abi.BrowserActResponse{URL: "https://lk.example/done", Text: r.Method + ":" + r.Value}, nil
+}
 
 func TestBrowserAndLog(t *testing.T) {
 	d := dispatcher(t, `capabilities: { browser: { domains: ["${setting:allowed}"] } }`, map[string]any{"allowed": "lk.example"})
@@ -401,8 +414,25 @@ func TestBrowserAndLog(t *testing.T) {
 	if err := call(t, d, abi.FnBrowserObserve, abi.BrowserRequest{}, &p); err != nil || p.Text != "balance 10" {
 		t.Fatal(p, err)
 	}
-	if err := call(t, d, abi.FnBrowserAct, abi.BrowserRequest{Selector: "#pay", Method: "click"}, nil); code(err) != abi.CodeNotSupported {
+	var a abi.BrowserActResponse
+	if err := call(t, d, abi.FnBrowserAct, abi.BrowserRequest{Selector: "#sum", Method: abi.ActFill, Value: "10"}, &a); err != nil || a.Text != "fill:10" {
+		t.Fatal(a, err)
+	}
+	for _, bad := range []abi.BrowserRequest{
+		{Selector: "#pay", Method: "act", Value: "pay the bill"},
+		{Selector: "#pay", Method: abi.ActPress, Value: "F12"},
+		{Method: abi.ActClick},
+		{Selector: "#pay", Method: abi.ActClick, TimeoutMS: 10 * MaxActTimeout},
+	} {
+		if err := call(t, d, abi.FnBrowserAct, bad, nil); err == nil {
+			t.Fatal("must be rejected:", bad)
+		}
+	}
+	if err := call(t, d, abi.FnBrowserAct, abi.BrowserRequest{Selector: "#missing", Method: abi.ActClick}, nil); code(err) != abi.CodeNotFound {
 		t.Fatal(err)
+	}
+	if err := call(t, d, abi.FnBrowserAct, abi.BrowserRequest{Selector: "#away", Method: abi.ActClick}, nil); code(err) != abi.CodeCapabilityDenied {
+		t.Fatal("click led off the allowlist:", err)
 	}
 	d.used = []string{"tok-SECRET-123"}
 	call(t, d, abi.FnLog, abi.LogRequest{Level: "info", Msg: "token tok-SECRET-123 used"}, nil)

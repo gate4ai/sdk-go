@@ -125,6 +125,14 @@ func (h *Host) BrowserScreenshot(selector string) ([]byte, error) {
 	return out.PNG, err
 }
 
+// BrowserAct — browser_act: click / fill / press / wait по CSS-селектору
+// (и необязательному тексту элемента). Нет элемента за время ожидания — not_found.
+func (h *Host) BrowserAct(r BrowserRequest) (BrowserActResponse, error) {
+	var out BrowserActResponse
+	err := h.call(FnBrowserAct, BrowserRequest{Selector: r.Selector, Method: r.Method, Text: r.Text, Value: r.Value, TimeoutMS: r.TimeoutMS}, &out)
+	return out, err
+}
+
 // Dial — tls_dial: соединение (net.Conn) поверх conn_read / conn_write.
 func (h *Host) Dial(r DialRequest) (net.Conn, error) {
 	var out DialResponse
