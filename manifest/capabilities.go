@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gate4ai/sdk-go/domain"
 	"gopkg.in/yaml.v3"
 )
 
@@ -48,9 +49,19 @@ type SecretCap struct {
 	Bind  []string `json:"bind" yaml:"bind"`
 }
 
-// BrowserCap — домены для функций browser_*.
+// Режимы списка сайтов браузера.
+const (
+	BrowserAllowlist = "allowlist" // только Domains
+	BrowserBlocklist = "blocklist" // все, кроме Blocked
+)
+
+// BrowserCap — сайты для функций browser_*: белый список Domains или чёрный
+// Blocked. Mode — allowlist | blocklist | ${setting:…}; пустое значение —
+// blocklist, если объявлен Blocked, иначе allowlist.
 type BrowserCap struct {
-	Domains []string `json:"domains" yaml:"domains"`
+	Mode    string   `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Domains []string `json:"domains" yaml:"domains,omitempty"`
+	Blocked []string `json:"blocked,omitempty" yaml:"blocked,omitempty"`
 }
 
 // StorageCap — собственное KV-хранилище коннектора.
@@ -134,8 +145,22 @@ func (c Capabilities) validate() error {
 		}
 	}
 	if c.Browser != nil {
+		switch m := c.Browser.Mode; {
+		case m == "", m == BrowserAllowlist, m == BrowserBlocklist:
+		case tmplRe.MatchString(m):
+			if err := checkTemplate("capabilities.browser.mode", m); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("capabilities.browser.mode: %q must be allowlist, blocklist or ${setting:…}", m)
+		}
 		for _, d := range c.Browser.Domains {
 			if err := checkTemplate("capabilities.browser.domains", d); err != nil {
+				return err
+			}
+		}
+		for _, d := range c.Browser.Blocked {
+			if err := checkTemplate("capabilities.browser.blocked", d); err != nil {
 				return err
 			}
 		}
@@ -156,12 +181,12 @@ func (c Capabilities) validate() error {
 
 // Resolved — возможности с подставленными настройками конкретного экземпляра.
 type Resolved struct {
-	Network        []NetworkRule
-	Secrets        []SecretRule
-	BrowserDomains []string
-	Browser        bool
-	Files          []string
-	StorageBytes   int64
+	Network      []NetworkRule
+	Secrets      []SecretRule
+	BrowserSites domain.Sites
+	Browser      bool
+	Files        []string
+	StorageBytes int64
 }
 
 // NetworkRule — разрешённый адрес; Port 0 — любой.
@@ -288,7 +313,26 @@ func (c Capabilities) Resolve(settings map[string]any) (Resolved, error) {
 	}
 	if c.Browser != nil {
 		r.Browser = true
-		r.BrowserDomains = expandAll(c.Browser.Domains, settings)
+		mode := c.Browser.Mode
+		if x := Expand(mode, settings); len(x) > 0 {
+			mode = x[0]
+		} else {
+			mode = ""
+		}
+		switch mode {
+		case BrowserAllowlist:
+		case BrowserBlocklist:
+			r.BrowserSites.Blocklist = true
+		case "":
+			r.BrowserSites.Blocklist = len(c.Browser.Blocked) > 0
+		default:
+			return r, fmt.Errorf("capabilities.browser.mode: setting value %q must be allowlist or blocklist", mode)
+		}
+		if r.BrowserSites.Blocklist {
+			r.BrowserSites.Domains = expandAll(c.Browser.Blocked, settings)
+		} else {
+			r.BrowserSites.Domains = expandAll(c.Browser.Domains, settings)
+		}
 	}
 	r.Files = expandAll(c.Files, settings)
 	if c.Storage != nil {
@@ -310,8 +354,15 @@ func (c Capabilities) Summary() []string {
 	for _, s := range c.Secrets {
 		out = append(out, fmt.Sprintf("secret %s for %s", s.Alias, strings.Join(s.Bind, ", ")))
 	}
-	if c.Browser != nil {
-		out = append(out, "browser on "+strings.Join(c.Browser.Domains, ", "))
+	if b := c.Browser; b != nil {
+		switch {
+		case b.Mode == "" && len(b.Blocked) == 0, b.Mode == BrowserAllowlist:
+			out = append(out, "browser on "+strings.Join(b.Domains, ", "))
+		case b.Mode == BrowserBlocklist:
+			out = append(out, "browser on all sites except "+strings.Join(b.Blocked, ", "))
+		default:
+			out = append(out, fmt.Sprintf("browser by %s: only %s or all sites except %s", b.Mode, strings.Join(b.Domains, ", "), strings.Join(b.Blocked, ", ")))
+		}
 	}
 	for _, f := range c.Files {
 		out = append(out, "files "+f)

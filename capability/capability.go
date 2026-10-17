@@ -76,7 +76,10 @@ func (c *Checker) Browser(url string) error {
 	if !c.R.Browser {
 		return denied("browser is not declared in capabilities.browser")
 	}
-	if !domain.Matches(url, c.R.BrowserDomains) {
+	if !c.R.BrowserSites.Allows(url) {
+		if c.R.BrowserSites.Blocklist {
+			return denied("%s is blocked by capabilities.browser.blocked (or is a local address)", url)
+		}
 		return denied("domain of %s is not in capabilities.browser.domains", url)
 	}
 	return nil

@@ -33,6 +33,7 @@ import (
 
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/capability"
+	"github.com/gate4ai/sdk-go/domain"
 	"github.com/gate4ai/sdk-go/manifest"
 	"github.com/gate4ai/sdk-go/netauth"
 )
@@ -58,8 +59,8 @@ type Browser interface {
 
 // BrowserSession — действия в выделенном профиле Chrome.
 type BrowserSession interface {
-	// Open переходит по URL; allowed — домены, итоговый адрес после редиректов тоже проверяется.
-	Open(ctx context.Context, url string, allowed []string) (abi.BrowserPage, error)
+	// Open переходит по URL; sites — разрешённые сайты, итоговый адрес после редиректов тоже проверяется.
+	Open(ctx context.Context, url string, sites domain.Sites) (abi.BrowserPage, error)
 	Observe(ctx context.Context, maxChars int) (abi.BrowserPage, error)
 	Extract(ctx context.Context, instruction string) (any, error)
 	ScreenshotElement(ctx context.Context, selector string) ([]byte, error)
@@ -657,7 +658,7 @@ func (d *Dispatcher) browser(fn string, r abi.BrowserRequest) (any, error) {
 	ctx := d.ctx()
 	switch fn {
 	case abi.FnBrowserOpen:
-		p, err := s.Open(ctx, r.URL, d.Check.R.BrowserDomains)
+		p, err := s.Open(ctx, r.URL, d.Check.R.BrowserSites)
 		if err != nil {
 			return nil, abi.Errorf(abi.CodeIO, "%v", err)
 		}

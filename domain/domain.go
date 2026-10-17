@@ -5,6 +5,7 @@
 package domain
 
 import (
+	"net"
 	"net/url"
 	"strings"
 )
@@ -55,4 +56,33 @@ func Matches(raw string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+// Sites — какие сайты разрешены: белый список (только Domains) или чёрный
+// (все, кроме Domains).
+type Sites struct {
+	Blocklist bool
+	Domains   []string
+}
+
+// Allows — URL разрешён. Не http(s)-адрес не разрешён ни в каком режиме;
+// чёрный список не открывает адреса этой машины и локальной сети (localhost,
+// IP loopback, частные и link-local) — их можно разрешить только белым списком.
+func (s Sites) Allows(raw string) bool {
+	h := HostOf(raw)
+	if h == "" {
+		return false
+	}
+	if !s.Blocklist {
+		return Matches(raw, s.Domains)
+	}
+	return !isLocal(h) && !Matches(raw, s.Domains)
+}
+
+func isLocal(host string) bool {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified())
 }

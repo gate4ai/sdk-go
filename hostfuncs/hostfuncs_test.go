@@ -27,6 +27,7 @@ import (
 
 	"github.com/gate4ai/sdk-go/abi"
 	"github.com/gate4ai/sdk-go/capability"
+	"github.com/gate4ai/sdk-go/domain"
 	"github.com/gate4ai/sdk-go/manifest"
 )
 
@@ -366,7 +367,7 @@ func TestDialSMTPAuthPlain(t *testing.T) {
 type fakeBrowser struct{ released bool }
 
 func (b *fakeBrowser) Acquire(context.Context) (BrowserSession, error) { return b, nil }
-func (b *fakeBrowser) Open(_ context.Context, u string, _ []string) (abi.BrowserPage, error) {
+func (b *fakeBrowser) Open(_ context.Context, u string, _ domain.Sites) (abi.BrowserPage, error) {
 	if strings.Contains(u, "redirect") {
 		return abi.BrowserPage{URL: "https://evil.example/"}, nil
 	}

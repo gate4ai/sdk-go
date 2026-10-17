@@ -102,3 +102,46 @@ func TestPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBrowserMode(t *testing.T) {
+	const caps = `capabilities: { browser: { mode: "${setting:mode}", domains: ["${setting:allowed}"], blocked: ["${setting:blocked}"] } }`
+	lists := map[string]any{"allowed": []any{"*.bank.example"}, "blocked": []any{"*.evil.example"}}
+	with := func(mode string) map[string]any {
+		s := map[string]any{"mode": mode}
+		for k, v := range lists {
+			s[k] = v
+		}
+		return s
+	}
+	cases := []struct {
+		settings map[string]any
+		url      string
+		ok       bool
+	}{
+		{lists, "https://ozon.ru/", true}, // режим не задан — чёрный список
+		{lists, "https://a.evil.example/", false},
+		{lists, "http://127.0.0.1:8080/", false},
+		{map[string]any{}, "https://ozon.ru/", true},
+		{with("blocklist"), "https://lk.bank.example/", true},
+		{with("allowlist"), "https://lk.bank.example/", true},
+		{with("allowlist"), "https://ozon.ru/", false},
+		{map[string]any{"mode": "allowlist"}, "https://ozon.ru/", false},
+	}
+	for _, c := range cases {
+		err := checker(t, caps, c.settings, "").Browser(c.url)
+		if c.ok && err != nil || !c.ok && !isDenied(err) {
+			t.Errorf("%v %s: %v", c.settings, c.url, err)
+		}
+	}
+	// без mode и blocked — белый список, как раньше
+	if err := checker(t, `capabilities: { browser: { domains: [lk.bank.example] } }`, nil, "").Browser("https://ozon.ru/"); !isDenied(err) {
+		t.Fatal(err)
+	}
+	m, _ := manifest.Parse([]byte("connector: x\n" + caps))
+	if _, err := New(m, map[string]any{"mode": "greylist"}, ""); err == nil {
+		t.Fatal("bad mode accepted")
+	}
+	if _, err := manifest.Parse([]byte("connector: x\ncapabilities: { browser: { mode: greylist } }")); err == nil {
+		t.Fatal("bad mode in manifest accepted")
+	}
+}
